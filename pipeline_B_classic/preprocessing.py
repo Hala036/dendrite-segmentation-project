@@ -1,12 +1,18 @@
 """
-preprocessing.py - Pipeline A: Classic Computer Vision
+preprocessing.py - Pipeline B: Classic Computer Vision
 =======================================================
+PURPOSE OF THIS FILE:
+    Raw SEM images are "dirty" - they have uneven lighting, noise, and low contrast.
+    Before we can segment anything, we need to clean and normalize the image so that
+    our segmentation algorithms work reliably across ALL images, not just well-lit ones.
+
+    Think of this as "preparing the canvas" before doing any real work.
 
 STEPS IN ORDER:
-    1. Load image as grayscale
+    1. Load image as grayscale & crop metadata bar → get a clean 2D array of pixel values
     2. Histogram Normalization  → gives all images the same brightness range
-    3. CLAHE for local contrast
-    4. Bilateral Filter to remove noise while keeping dendrite edges sharp
+    3. CLAHE                    → boosts local contrast so thin dendrites become visible
+    4. Bilateral Filter         → removes noise while KEEPING dendrite edges sharp
 """
 
 import cv2
@@ -15,12 +21,18 @@ from pathlib import Path
 
 
 # ==============================================================================
-# STEP 1: IMAGE LOADING
+# STEP 1: IMAGE LOADING + CROPPING
 # ==============================================================================
 
 def load_image(image_path: str) -> np.ndarray:
     """
     Loads an image from disk and converts it to grayscale.
+
+    WHY GRAYSCALE?
+        SEM images are inherently grayscale - they encode surface height/material
+        density as brightness. There is no color information. Working in grayscale
+        means we deal with a single channel (2D array) instead of 3 (RGB),
+        which simplifies every operation that follows.
 
     Args:
         image_path: Path to the image file (jpg, png, tif, etc.)
@@ -36,7 +48,8 @@ def load_image(image_path: str) -> np.ndarray:
     if not path.exists():
         raise FileNotFoundError(f"Image not found: {image_path}")
 
-    # cv2.IMREAD_GRAYSCALE forces single-channel loading, which is what we want for SEM images
+    # cv2.IMREAD_GRAYSCALE forces single-channel loading
+    # even if the file was saved as RGB
     image = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
 
     if image is None:
@@ -44,7 +57,7 @@ def load_image(image_path: str) -> np.ndarray:
 
     return image
 
-def crop_metadata_bar(image: np.ndarray, crop_fraction: float = 0.09) -> np.ndarray:
+def crop_metadata_bar(image: np.ndarray, crop_fraction: float = 0.065) -> np.ndarray:
     """
     Removes the SEM metadata bar at the bottom of the image.
     crop_fraction: what fraction of image height to remove (default 9%)
@@ -61,8 +74,23 @@ def crop_metadata_bar(image: np.ndarray, crop_fraction: float = 0.09) -> np.ndar
 def normalize_histogram(image: np.ndarray) -> np.ndarray:
     """
     Stretches pixel values to use the full range [0, 255].
-    so that we can set consistent thresholds and filters later.
-    new_value = (old_value - min) / (max - min) * 255
+
+    WHY DO WE NEED THIS?
+        Different SEM images may have been captured at different exposure settings.
+        One image might use pixel values in range [30, 200], another in [80, 240].
+        This means the same dendrite could look bright in one image and dark in another.
+
+        Normalization gives EVERY image the same baseline, so that any threshold
+        or filter value we set later works consistently across the whole dataset.
+
+        Think of it like adjusting the "levels" in Photoshop - we're just stretching
+        the histogram to fill the full 0-255 range.
+
+    HOW IT WORKS (linear stretch):
+        new_value = (old_value - min) / (max - min) * 255
+
+        The darkest pixel becomes 0, the brightest becomes 255,
+        everything else scales linearly in between.
 
     Args:
         image: 2D grayscale numpy array
@@ -81,6 +109,7 @@ def normalize_histogram(image: np.ndarray) -> np.ndarray:
         dtype=cv2.CV_8U     # output : unsigned 8-bit integer (0-255)
     )
 
+
     return normalized
 
 
@@ -89,14 +118,43 @@ def normalize_histogram(image: np.ndarray) -> np.ndarray:
 # ==============================================================================
 
 def apply_clahe(image: np.ndarray,
-                clip_limit: float = 2.0,
+                clip_limit: float = 1.0,
                 tile_size: int = 8) -> np.ndarray:
     """
     Applies CLAHE (Contrast Limited Adaptive Histogram Equalization).
 
-    clip limit:
+    WHY NOT REGULAR HISTOGRAM EQUALIZATION?
+        Regular (global) histogram equalization looks at the WHOLE image at once.
+        This causes two problems for SEM images:
+            1. It "burns out" bright areas (electrode regions appear completely white)
+            2. It amplifies background noise to look like actual structure
+
+        This is why regular equalization is explicitly called a "common mistake"
+        in your project document.
+
+    WHAT CLAHE DOES DIFFERENTLY:
+        Instead of one global histogram, CLAHE divides the image into a grid of
+        small tiles (e.g., 8x8 pixels each). It computes and equalizes the
+        histogram SEPARATELY for each tile.
+
+        Result: a thin dendrite in a dark shadowed corner gets the same contrast
+        boost as a thick dendrite in a bright area. Neither gets "burned."
+
+    The reasoning for 8 specifically: dendrite branches in SEM images are thin structures 
+    that occupy small regions. A tile needs to be small enough to "see" a thin branch in 
+    its own neighborhood and boost it, but not so small that individual noise pixels get 
+    their own enhancement zone.
+
+    THE CLIP LIMIT:
+        If a tile has very few distinct gray values (e.g., a completely flat region),
+        standard equalization would massively amplify tiny noise variations.
+        The clip_limit caps how much any single intensity can be boosted,
+        preventing noise from being mistaken for structure.
+
         - Low clip (1.0-2.0): gentle enhancement, safer for noisy images
         - High clip (3.0-4.0): aggressive enhancement, risks noise amplification
+    
+    The clip limit controls how aggressively each tile's histogram is amplified.
 
     Args:
         image:      2D grayscale numpy array (after normalization)
@@ -123,11 +181,46 @@ def apply_clahe(image: np.ndarray,
 def apply_bilateral_filter(image: np.ndarray,
                             diameter: int = 9,
                             sigma_color: float = 75,
-                            sigma_space: float = 75) -> np.ndarray:
+                            sigma_space: float = 4.5) -> np.ndarray:
     """
     Applies a Bilateral Filter to remove noise while preserving edges.
 
-        NOTE: may need to tune these in notebook.
+    WHY NOT GAUSSIAN BLUR?
+        Gaussian blur is the most common denoising filter - it averages each pixel
+        with its neighbors. The problem: it doesn't care whether a neighbor is
+        "same surface" or "across a dendrite boundary."
+
+        Result: dendrite edges get blurry, thin branches lose definition,
+        and you can no longer tell where the dendrite ends and background begins.
+
+        Your project document explicitly warns: "This blurring causes loss of
+        critical information about the true branch width."
+
+    HOW BILATERAL FILTER WORKS:
+        Like Gaussian blur, it averages nearby pixels. But it has TWO conditions
+        for including a neighbor in the average:
+
+            Condition 1 - SPATIAL: the neighbor must be physically close (sigma_space)
+            Condition 2 - INTENSITY: the neighbor must have similar brightness (sigma_color)
+
+        If a neighboring pixel is across a sharp edge (very different brightness),
+        it gets almost ZERO weight in the average. The edge is preserved.
+        If the neighbor is in the same smooth region, it contributes normally.
+
+    PARAMETER GUIDE:
+        diameter:    The pixel neighborhood size. Larger = stronger smoothing.
+                     9 is a good balance. Above 15 becomes very slow.
+
+        sigma_color: How much brightness difference is "allowed" before a neighbor
+                     is excluded. Higher = smoother but less edge-aware.
+                     Range: 50 (strict) to 150 (permissive)
+
+        sigma_space: How far spatially a neighbor can be to still contribute.
+                     Higher = larger smooth regions.
+                     Range: 50 (local) to 150 (wide)
+
+        NOTE: For SEM images, keeping both sigmas at 75 is a safe starting point.
+        You may need to tune these in your notebook.
 
     Args:
         image:       2D grayscale array (after CLAHE)
@@ -149,7 +242,7 @@ def apply_bilateral_filter(image: np.ndarray,
 
 
 # ==============================================================================
-# MASTER FUNCTION - run all steps in order
+# MASTER FUNCTION - runs all steps in order
 # ==============================================================================
 
 def preprocess(image_path: str,
@@ -160,7 +253,8 @@ def preprocess(image_path: str,
     """
     Runs the full preprocessing pipeline on a single SEM image.
 
-    Returns a dictionary with intermediate results.
+    Returns a dictionary with intermediate results so you can inspect
+    what each step did - useful for debugging and the report visuals.
 
     Args:
         image_path:       Path to raw SEM image
@@ -174,10 +268,10 @@ def preprocess(image_path: str,
             'raw'        → original loaded image
             'normalized' → after histogram normalization
             'clahe'      → after contrast enhancement
-            'denoised'   → after bilateral filter
+            'denoised'   → after bilateral filter (READY FOR SEGMENTATION)
     """
     raw = load_image(image_path)
-    raw = crop_metadata_bar(raw)  # Remove SEM metadata bar if present
+    raw = crop_metadata_bar(raw)  # Remove SEM metadata bar before any processing
     normalized = normalize_histogram(raw)
     clahe_result = apply_clahe(normalized, clahe_clip, clahe_tile)
     denoised = apply_bilateral_filter(clahe_result, bilateral_d, bilateral_sigma)
@@ -186,7 +280,7 @@ def preprocess(image_path: str,
         'raw': raw,
         'normalized': normalized,
         'clahe': clahe_result,
-        'denoised': denoised
+        'denoised': denoised       # <-- this is what segmentation.py will receive
     }
 
 
@@ -198,9 +292,12 @@ def visualize_steps(results: dict, save_path = None) -> None:
     """
     Plots all preprocessing steps side by side for inspection.
 
+    Use this in your notebook to verify each step is doing what you expect
+    before moving to segmentation.
+
     Args:
         results:   Dictionary returned by preprocess()
-        save_path: saves the figure to this path (outputs/visuals/preprocessing_check.png)
+        save_path: If provided, saves the figure to this path
     """
     import matplotlib.pyplot as plt
 
@@ -225,7 +322,7 @@ def visualize_steps(results: dict, save_path = None) -> None:
 
 
 # ==============================================================================
-# TEST - main to test on a single image
+# QUICK TEST - run this file directly to test on a single image
 # ==============================================================================
 
 if __name__ == "__main__":
