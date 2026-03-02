@@ -48,6 +48,7 @@ def adaptive_threshold(image: np.ndarray,
                         block_size: int = 35,
                         C: float = 4) -> np.ndarray:
     """
+    NOTE: delete this method if not used later, right now otsu is better and is the default.
     Applies Adaptive Thresholding to produce a binary mask.
 
     WHY ADAPTIVE AND NOT GLOBAL?
@@ -188,54 +189,6 @@ def otsu_threshold(image: np.ndarray) -> tuple[np.ndarray, float]:
 
 
 # ==============================================================================
-# STEP 3: REMOVE BRIGHT ELECTRODE BASE (REGION MASKING)
-# ==============================================================================
-
-def mask_electrode_region(binary_mask: np.ndarray,
-                           electrode_fraction: float = 0.35) -> np.ndarray:
-    """
-    Blacks out the bottom portion of the mask where the electrode base sits.
-
-    WHY IS THIS NECESSARY?
-        Looking at your preprocessing output, the bottom ~30-40% of the image
-        is the bright electrode/substrate layer. This entire region will be
-        classified as "dendrite" by any thresholding method because it IS bright
-        — but it's not a dendrite, it's the base material.
-
-        We know from the physics of the problem that dendrites GROW UPWARD
-        from the electrode surface. So the solid base layer below the growth
-        zone is never a dendrite structure — it's just the anode.
-
-        Blacking out this region is a physically motivated decision, not a hack.
-        We're using domain knowledge to remove a known source of false positives.
-
-    HOW TO TUNE electrode_fraction:
-        Look at your images: where does the solid electrode base end
-        and the dendrite growth zone begin?
-        - If the base takes up ~35% of image height → use 0.35
-        - Adjust per dataset if images have different zoom levels
-
-        You may want to make this smarter later (e.g., detect the electrode
-        boundary automatically using a horizontal gradient scan).
-
-    Args:
-        binary_mask:        2D binary array from adaptive_threshold()
-        electrode_fraction: Fraction of image HEIGHT to black out from bottom
-
-    Returns:
-        Binary mask with electrode base region zeroed out
-    """
-    masked = binary_mask.copy()
-    h = masked.shape[0]
-    cutoff = int(h * (1 - electrode_fraction))  # row index where electrode starts
-
-    # Zero out everything below the cutoff row
-    masked[cutoff:, :] = 0
-
-    return masked
-
-
-# ==============================================================================
 # MASTER FUNCTION
 # ==============================================================================
 
@@ -274,14 +227,11 @@ def segment(preprocessed_image: np.ndarray,
     else:
         raise ValueError(f"method must be 'adaptive' or 'otsu', got: '{method}'")
 
-    # Remove the electrode base region from the mask
-    final_mask = mask_electrode_region(raw_mask, electrode_fraction)
-
     return {
         'adaptive_raw': adaptive_raw,
         'otsu_raw':     otsu_raw,
         'otsu_value':   otsu_value,
-        'mask':         final_mask,     # <-- this is what postprocessing.py receives
+        'mask':         raw_mask,     # <-- this is what postprocessing.py receives
         'method_used':  method
     }
 
