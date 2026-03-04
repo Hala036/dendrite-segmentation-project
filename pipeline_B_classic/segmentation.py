@@ -1,5 +1,5 @@
 """
-segmentation.py - Pipeline A: Classic Computer Vision
+segmentation.py - Pipeline B: Classic Computer Vision
 ======================================================
 PURPOSE OF THIS FILE:
     This is the core decision-making step of the entire pipeline.

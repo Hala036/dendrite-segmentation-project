@@ -1,5 +1,5 @@
 """
-run_pipeline_a.py - Pipeline A: Main Runner
+run_pipeline_a.py - Pipeline B: Main Runner
 ============================================
 PURPOSE OF THIS FILE:
     Runs preprocessing and segmentation in sequence on all images in data/raw/.
