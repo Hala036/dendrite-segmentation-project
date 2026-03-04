@@ -23,7 +23,6 @@ STEPS IN ORDER:
 
 import cv2
 import numpy as np
-from scipy import ndimage
 from skimage.morphology import reconstruction
 
 
@@ -105,16 +104,16 @@ def get_adaptive_kernel_size(mask: np.ndarray) -> int:
     areas = stats[1:, cv2.CC_STAT_AREA]  # skip background
     avg_area = np.median(areas)          # median is more robust than mean
     
-    if avg_area < 200:
-        return 3   # small sparse structures → Type 1
+    if avg_area < 500:
+        return 5   # small sparse structures → Type 1
     elif avg_area < 800:
         return 7   # medium → transition
     else:
-        return 11  # large dense structures → Type 2
+        return 9   # large dense structures → Type 2
 
 
 def apply_closing(mask: np.ndarray,
-                  kernel_size: int) -> np.ndarray:
+                  kernel_size: int = -1) -> np.ndarray:
     """
     Fills small holes inside dendrite bodies and bridges tiny gaps.
 
@@ -170,7 +169,8 @@ def apply_closing(mask: np.ndarray,
 # ==============================================================================
 
 def apply_morphological_reconstruction(mask: np.ndarray,
-                                        erosion_size: int = 3) -> np.ndarray:
+                                        erosion_size: int = 5,
+                                        iters: int = 3) -> np.ndarray:
     """
     Recovers thin branches lost during closing while rejecting noise.
 
@@ -217,7 +217,7 @@ def apply_morphological_reconstruction(mask: np.ndarray,
     Args:
         mask:         Binary mask after closing (Step 2)
         erosion_size: Size of erosion kernel for creating the marker
-
+        iters:         Number of iterations for reconstruction
     Returns:
         Reconstructed mask — thin branches recovered, isolated noise rejected
     """
@@ -229,13 +229,8 @@ def apply_morphological_reconstruction(mask: np.ndarray,
         cv2.MORPH_ELLIPSE,
         (erosion_size, erosion_size)
     )
-    marker = cv2.erode(mask_normalized, erosion_kernel, iterations=3)
+    marker = cv2.erode(mask_normalized, erosion_kernel, iterations=iters)
 
-    # ── DEBUG ──────────────────────────────────────
-    print(f'  mask  white pixels: {mask_normalized.sum()}')
-    print(f'  marker white pixels: {marker.sum()}')
-    # ───────────────────────────────────────────────
-    
     # Reconstruction: grow marker under the mask constraint
     # method='dilation': marker expands toward mask but never beyond it
     reconstructed = reconstruction(
@@ -256,9 +251,10 @@ def apply_morphological_reconstruction(mask: np.ndarray,
 # ==============================================================================
 
 def postprocess(mask: np.ndarray,
-                min_area: int = 50,
+                min_area: int = 300,
                 closing_kernel: int = -1,
-                erosion_size: int = 3) -> dict:
+                erosion_size: int = 5,
+                iters: int = 3) -> dict:
     """
     Runs the full postprocessing pipeline on a binary segmentation mask.
 
@@ -267,6 +263,7 @@ def postprocess(mask: np.ndarray,
         min_area:       Minimum component area to keep
         closing_kernel: Kernel size for morphological closing
         erosion_size:   Erosion size for reconstruction marker
+        iters:          Number of iterations for reconstruction
 
     Returns:
         Dictionary with intermediate results:
@@ -277,7 +274,7 @@ def postprocess(mask: np.ndarray,
     """
     no_small = remove_small_components(mask, min_area)
     closed = apply_closing(no_small, closing_kernel)
-    reconstructed = apply_morphological_reconstruction(closed, erosion_size)
+    reconstructed = apply_morphological_reconstruction(closed, erosion_size, iters)
 
     return {
         'input': mask,
