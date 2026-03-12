@@ -1,0 +1,5 @@
+[flake8]
+# Ignore line length (E501) and other common style checks if you prefer
+max-line-length = 120
+ignore = E501, W503 , F401 , F541
+exclude = .git,__pycache__,.venv,venv
