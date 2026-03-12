@@ -243,7 +243,7 @@ def main(args):
     weights_path = Path(args.weights)
     assert weights_path.exists(), \
         f"Weights not found: {args.weights}\n" \
-        f"Did you run train_yolo.py first?"
+        f"Did you run pipeline_A_yolo/train.py first?"
 
     print(f"\nLoading model...")
     model = YOLO(str(weights_path))
@@ -291,7 +291,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--weights', type=str,
                         default='outputs/weights/best.pt',
-                        help='Path to trained weights from train_yolo.py')
+                        help='Path to trained weights from pipeline_A_yolo/train.py')
     parser.add_argument('--image',   type=str, default=None,
                         help='Single image path')
     parser.add_argument('--folder',  type=str, default=None,

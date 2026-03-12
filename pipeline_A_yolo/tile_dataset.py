@@ -239,12 +239,33 @@ def tile_dataset(input_dir: str,
 
     # ── VAL + TEST: copy as-is ────────────────────────────────────────────────
     # Roboflow exports often use 'valid' not 'val' — resolve from data.yaml
+    def resolve_split_folder(path_value: str, fallback_key: str) -> str:
+        """
+        Extracts the split folder name from yaml paths like:
+            ../valid/images
+            valid/images
+            /abs/path/to/valid/images
+            valid
+        """
+        parts = [p for p in Path(path_value).parts if p not in ('', '.', '/')]
+
+        if 'images' in parts:
+            idx = parts.index('images')
+            if idx > 0:
+                return parts[idx - 1]
+
+        for p in reversed(parts):
+            if p not in ('..', 'images'):
+                return p
+
+        return fallback_key
+
     with open(input_path / 'data.yaml', 'r') as f:
         yaml_data_in = yaml.safe_load(f)
     split_folders = []
     for key in ['val', 'test']:
         path_val = yaml_data_in.get(key, f"../{key}/images")
-        folder = path_val.strip().split('/')[1] if '/' in path_val else key
+        folder = resolve_split_folder(path_val, key)
         split_folders.append((key, folder))
 
     for split_key, folder in split_folders:
@@ -288,7 +309,7 @@ def tile_dataset(input_dir: str,
     print(f"  Val images  : {len(list((output_path / 'val' / 'images').glob('*')))}")
     print(f"  Test images : {len(list((output_path / 'test' / 'images').glob('*'))) if (output_path / 'test').exists() else 0}")
     print(f"  Output dir  : {output_path.resolve()}")
-    print(f"\nNext step: python train_yolo.py --data {output_yaml}")
+    print(f"\nNext step: python pipeline_A_yolo/train.py --data {output_yaml}")
 
 
 # ==============================================================================

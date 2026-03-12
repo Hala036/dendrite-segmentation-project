@@ -32,7 +32,6 @@ HARDWARE NOTES:
 """
 
 import argparse
-import os
 import shutil
 import yaml
 from pathlib import Path
@@ -208,7 +207,7 @@ def build_train_config(args) -> dict:
             # If you get CUDA out-of-memory errors, reduce to 8 or 4.
 
         # ── Output ───────────────────────────────────────────────────────────
-        'project': str(args.output),
+        'project': str(Path(args.output).resolve()),
             # Parent directory for all training outputs
 
         'name': args.run_name,
@@ -345,6 +344,25 @@ def copy_best_weights(run_dir: Path, output_weights_dir: str) -> Path:
     return dst
 
 
+def resolve_run_dir(results, args) -> Path:
+    """
+    Resolves the true run directory created by Ultralytics for this training run.
+    """
+    save_dir = getattr(results, 'save_dir', None)
+    if save_dir:
+        return Path(save_dir)
+
+    # Fallback: search expected output location
+    output_path = Path(args.output)
+    run_dirs = sorted(output_path.glob(f"{args.run_name}*"),
+                      key=lambda p: p.stat().st_mtime)
+    if run_dirs:
+        return run_dirs[-1]
+
+    # Last resort fallback for Ultralytics default nesting behavior
+    return Path('runs') / 'segment' / output_path / args.run_name
+
+
 # ==============================================================================
 # TRAINING SUMMARY
 # ==============================================================================
@@ -381,7 +399,8 @@ def print_training_summary(results, run_dir: Path, best_weights_path: Path) -> N
     print(f"\n  Run directory:   {run_dir}")
     print(f"  Best weights:    {best_weights_path}")
     print(f"  Training plots:  {run_dir}")
-    print(f"\nNext step: python predict_tiled.py --weights {best_weights_path}")
+    print(f"\nNext step: python pipeline_A_yolo/predict.py "
+          f"--weights {best_weights_path} --folder data/annotated/test/images")
     print("=" * 55)
 
 
@@ -428,12 +447,8 @@ def train(args) -> None:
 
     results = model.train(**config)
 
-    # Step 4: Find actual run directory YOLO created
-    # YOLO may append numbers if run_name already exists (run_name, run_name2, etc.)
-    output_path = Path(args.output)
-    run_dirs = sorted(output_path.glob(f"{args.run_name}*"),
-                      key=lambda p: p.stat().st_mtime)
-    run_dir = run_dirs[-1] if run_dirs else output_path / args.run_name
+    # Step 4: Resolve actual run directory YOLO created
+    run_dir = resolve_run_dir(results, args)
 
     # Step 5: Copy best weights
     best_weights = copy_best_weights(run_dir, 'outputs/weights')
@@ -462,10 +477,9 @@ if __name__ == "__main__":
     # Model
     parser.add_argument(
         '--model', type=str,
-        default='yolo12n-seg.pt',
-        help='YOLO model to use. Options: yolo12n-seg.pt (fast), '
-             'yolo12s-seg.pt (balanced), yolo12m-seg.pt (accurate). '
-             'Update to yolo26n-seg.pt when available.'
+        default='yolo26n-seg.pt',
+        help='YOLO model to use. Options: yolo26n-seg.pt (fast), '
+             'yolo26s-seg.pt (balanced), yolo26m-seg.pt (accurate).'
     )
 
     # Training duration
