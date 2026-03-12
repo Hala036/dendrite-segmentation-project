@@ -238,14 +238,23 @@ def tile_dataset(input_dir: str,
     print(f"\n  Total train tiles: {total_tiles}  (from {len(train_images)} images)")
 
     # ── VAL + TEST: copy as-is ────────────────────────────────────────────────
-    for split in ['val', 'test']:
-        split_input = input_path / split
+    # Roboflow exports often use 'valid' not 'val' — resolve from data.yaml
+    with open(input_path / 'data.yaml', 'r') as f:
+        yaml_data_in = yaml.safe_load(f)
+    split_folders = []
+    for key in ['val', 'test']:
+        path_val = yaml_data_in.get(key, f"../{key}/images")
+        folder = path_val.strip().split('/')[1] if '/' in path_val else key
+        split_folders.append((key, folder))
+
+    for split_key, folder in split_folders:
+        split_input = input_path / folder
         if not split_input.exists():
-            print(f"\n  WARNING: {split}/ not found in input, skipping")
+            print(f"\n  WARNING: {folder}/ not found in input (for {split_key}), skipping")
             continue
 
-        print(f"\nSTEP {'2' if split == 'val' else '3'}: Copying {split} set (no tiling)")
-        split_output = output_path / split
+        print(f"\nSTEP {'2' if split_key == 'val' else '3'}: Copying {split_key} set (no tiling)")
+        split_output = output_path / split_key
         if split_output.exists():
             shutil.rmtree(split_output)
         shutil.copytree(str(split_input), str(split_output))
