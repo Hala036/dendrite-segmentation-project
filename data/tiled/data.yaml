@@ -1,7 +1,7 @@
 names:
 - Dendrite
 nc: 1
-path: C:\Users\muhis\dendrite-segmentation\data\tiled
+path: /Users/halaabutair/Desktop/Year 4/Image Processing/dendrite-segmentation/data/tiled
 roboflow:
   license: CC BY 4.0
   project: dendrite-segmentation-ao2bh
