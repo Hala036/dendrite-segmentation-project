@@ -1,38 +1,8 @@
 """
-segmentation.py - Pipeline B: Classic Computer Vision
-======================================================
-PURPOSE OF THIS FILE:
-    This is the core decision-making step of the entire pipeline.
-    We take the clean, denoised grayscale image from preprocessing.py
-    and convert it into a BINARY MASK — a black and white image where:
-        WHITE (255) = dendrite pixel
-        BLACK (0)   = background pixel
+Convert the preprocessed grayscale image into a binary dendrite mask.
 
-    Every pixel gets a label. No gray areas. This is called binarization.
-
-WHERE WE ARE IN THE PIPELINE:
-    preprocessing.py  →  [segmentation.py]  →  postprocessing.py
-    (clean grayscale)     (binary mask)         (refined mask)
-
-THE CORE CHALLENGE:
-    We need to find a "threshold" brightness value T such that:
-        pixel > T  →  dendrite (white)
-        pixel ≤ T  →  background (black)
-
-    The problem: SEM images have UNEVEN lighting across the image.
-    The electrode base at the bottom is very bright, the background at
-    the top is very dark, and dendrites sit somewhere in between.
-
-    A single global threshold T will always fail:
-        - If T is low  → dark background regions get classified as dendrite
-        - If T is high → thin dendrite tips disappear entirely
-
-    Solution: use a threshold that ADAPTS to local brightness at each pixel.
-
-STEPS IN THIS FILE:
-    1. Adaptive Thresholding  → initial binary mask (fast, local)
-    2. Otsu's Method          → alternative for comparison/reference
-    3. Combined strategy      → pick the best approach per image quality
+This file tries thresholding methods and returns the mask that will be used by
+the next pipeline step.
 """
 
 import cv2
@@ -48,73 +18,15 @@ def adaptive_threshold(image: np.ndarray,
                         block_size: int = 35,
                         C: float = 4) -> np.ndarray:
     """
-    NOTE: delete this method if not used later, right now otsu is better and is the default.
-    Applies Adaptive Thresholding to produce a binary mask.
-
-    WHY ADAPTIVE AND NOT GLOBAL?
-        Imagine the SEM image split into regions:
-            - Top region:    very dark background (low brightness)
-            - Middle region: dendrites growing upward (medium brightness)
-            - Bottom region: bright electrode base (high brightness)
-
-        A global threshold T picks ONE value for the whole image.
-        If T=127 (midpoint), it correctly finds dendrites in the middle,
-        but the bright electrode base gets entirely classified as dendrite,
-        and thin dark-region branches disappear.
-
-        Adaptive thresholding computes a DIFFERENT threshold for every pixel,
-        based on the average brightness of its local neighborhood.
-
-        Think of it as: "is this pixel brighter than its surroundings?"
-        rather than: "is this pixel brighter than some fixed value?"
-
-    HOW IT WORKS (step by step):
-        For each pixel P at position (x, y):
-            1. Take a square neighborhood of size block_size × block_size
-               centered on P
-            2. Compute the mean brightness of that neighborhood
-            3. Set threshold T_local = mean - C
-            4. If P > T_local → white (dendrite)
-               If P ≤ T_local → black (background)
-
-    THE block_size PARAMETER:
-        Controls how large the local neighborhood is.
-
-        - Too small (e.g., 5-11):  threshold reacts to individual noise pixels.
-          Every tiny bright speck becomes "dendrite." Mask is extremely noisy.
-
-        - Too large (e.g., 100+):  the neighborhood is so big it approaches
-          global thresholding. Loses the adaptive advantage in uneven regions.
-
-        - Sweet spot (25-51):      large enough to average over real structure,
-          small enough to adapt to local lighting changes.
-
-        RULE: block_size MUST be an odd number (OpenCV requirement).
-
-    THE C PARAMETER (constant subtraction):
-        After computing the local mean, we subtract C before comparing.
-        This acts as a fine-tuning offset:
-
-        - C = 0:  threshold equals local mean exactly. Very sensitive —
-                  half the pixels in any region will become white.
-
-        - C > 0:  pixel must be BRIGHTER than the local mean by C units
-                  to be classified as dendrite. Reduces false positives
-                  in noisy flat regions.
-
-        - C < 0:  even pixels DARKER than their neighborhood get classified
-                  as dendrite. Rarely useful for this application.
-
-        Typical range for SEM images: C between 2 and 10.
-        Start with 4 and adjust based on visual inspection.
+    Apply adaptive thresholding to get a binary mask.
 
     Args:
-        image:      2D grayscale array from preprocessing (denoised output)
-        block_size: Size of local neighborhood (must be odd, default 35)
-        C:          Constant subtracted from local mean (default 4)
+        image: Preprocessed grayscale image.
+        block_size: Local window size. Must be odd.
+        C: Small constant subtracted from the local mean.
 
     Returns:
-        Binary 2D array: 255 = dendrite, 0 = background
+        Binary mask with 255 for dendrites and 0 for background.
     """
     # Safety check: block_size must be odd
     if block_size % 2 == 0:
@@ -138,45 +50,13 @@ def adaptive_threshold(image: np.ndarray,
 
 def otsu_threshold(image: np.ndarray) -> tuple[np.ndarray, float]:
     """
-    Applies Otsu's automatic global thresholding.
-
-    WHAT IS OTSU'S METHOD?
-        Otsu's algorithm automatically finds the single best global threshold
-        by looking at the image histogram and finding the value T that
-        MAXIMIZES the separation between two classes (background vs dendrite).
-
-        Mathematically, it minimizes the weighted sum of within-class variances:
-            - Class 1: all pixels with value ≤ T (background)
-            - Class 2: all pixels with value > T  (dendrite)
-
-        It finds T such that pixels within each class are as similar as
-        possible to each other, and as different as possible from the other class.
-
-    WHEN TO USE OTSU vs ADAPTIVE:
-        Your project document says Otsu is only suitable when lighting is
-        "completely uniform (without shadows)."
-
-        USE OTSU when:
-            - The image has very even, flat lighting
-            - There's a clear bimodal histogram (two visible peaks)
-            - You want a quick sanity check or baseline comparison
-
-        USE ADAPTIVE when:
-            - Typical SEM images with uneven lighting (most cases)
-            - There's a bright electrode base + dark upper background
-            - Thin dendrite tips exist in shadowed regions
-
-        In practice: run BOTH and compare visually. Otsu gives you a useful
-        baseline to see how much improvement adaptive thresholding provides.
+    Apply Otsu thresholding and return the chosen threshold value.
 
     Args:
-        image: 2D grayscale array from preprocessing
+        image: Preprocessed grayscale image.
 
     Returns:
-        Tuple of:
-            - binary_mask: 2D array, 255 = dendrite, 0 = background
-            - threshold_value: the T value Otsu automatically selected
-              (useful to log for your report)
+        Binary mask and the threshold value picked by Otsu.
     """
     threshold_value, binary_mask = cv2.threshold(
         image,
@@ -198,22 +78,17 @@ def segment(preprocessed_image: np.ndarray,
             C: float = 4,
             electrode_fraction: float = 0.35) -> dict:
     """
-    Runs the full segmentation step on a preprocessed SEM image.
+    Run segmentation on a preprocessed image.
 
     Args:
-        preprocessed_image:  The 'denoised' output from preprocessing.preprocess()
-        method:              'adaptive' (recommended) or 'otsu' (for comparison)
-        block_size:          Adaptive threshold neighborhood size (odd number)
-        C:                   Adaptive threshold constant offset
-        electrode_fraction:  Fraction of bottom image to exclude (electrode base)
+        preprocessed_image: Output image from preprocessing.
+        method: `'adaptive'` or `'otsu'`.
+        block_size: Window size for adaptive thresholding.
+        C: Constant used in adaptive thresholding.
+        electrode_fraction: Unused parameter kept for compatibility.
 
     Returns:
-        Dictionary with keys:
-            'adaptive_raw'   → adaptive threshold result before electrode masking
-            'otsu_raw'       → otsu result before electrode masking
-            'otsu_value'     → the T value Otsu selected (log this in your report)
-            'mask'           → FINAL clean mask ready for postprocessing.py
-            'method_used'    → which method was used for the final mask
+        Dictionary with both raw threshold masks and the final chosen mask.
     """
     # Always compute both for comparison purposes
     adaptive_raw = adaptive_threshold(preprocessed_image, block_size, C)
@@ -244,14 +119,12 @@ def visualize_segmentation(preprocessed_image: np.ndarray,
                             seg_results: dict,
                             save_path = None) -> None:
     """
-    Plots the segmentation results for inspection.
-
-    Shows: preprocessed input | adaptive result | otsu result | final mask
+    Show the segmentation results side by side.
 
     Args:
-        preprocessed_image: The denoised image that was fed into segment()
-        seg_results:        Dictionary returned by segment()
-        save_path:          If provided, saves the figure to this path
+        preprocessed_image: Image passed into `segment()`.
+        seg_results: Output from `segment()`.
+        save_path: Optional path to save the figure.
     """
     import matplotlib.pyplot as plt
 
@@ -284,9 +157,7 @@ def save_mask_overlay(preprocessed_image: np.ndarray,
                       save_path: str,
                       alpha: float = 0.4) -> None:
     """
-    Saves a standalone overlay image (no multi-panel figure).
-
-    Green pixels indicate predicted dendrite mask over the preprocessed input.
+    Save a simple mask overlay image.
     """
     gray = preprocessed_image
     if gray.dtype != np.uint8:
@@ -309,13 +180,10 @@ def save_mask_overlay(preprocessed_image: np.ndarray,
 
 def tune_adaptive_parameters(image: np.ndarray) -> None:
     """
-    Interactive grid search over block_size and C values.
-    Run this in your notebook to find the best parameters for your dataset.
-
-    Shows a grid of results so you can visually pick the best combination.
+    Show a grid of adaptive threshold settings for quick comparison.
 
     Args:
-        image: Preprocessed (denoised) SEM image
+        image: Preprocessed image.
     """
     import matplotlib.pyplot as plt
 

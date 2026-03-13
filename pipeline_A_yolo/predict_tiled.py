@@ -1,26 +1,16 @@
 """
-predict_tiled.py - Pipeline A: Tiled YOLO Instance Segmentation Inference
-=========================================================================
-PURPOSE OF THIS FILE:
-    Runs YOLO inference on full SEM images by tiling them first (same tiling
-    strategy as train data), then stitches tile predictions back into one
-    full-resolution mask.
+Run tiled YOLO inference on full SEM images.
 
-WHY THIS EXISTS:
-    If you train on 640x640 tiles, running inference on full images can change
-    object scale after resize and hurt recall. Tiled inference keeps object
-    scale closer to training.
+This file cuts a large image into tiles, predicts each tile, and then joins the
+tile masks back into one full-size mask. It uses the same tile idea as the
+training dataset, so the object scale stays similar.
 
-USAGE:
-    # Entire folder (recommended):
+Examples:
     python predict_tiled.py --weights outputs/weights/best.pt \
-                            --folder data/annotated/test/images \
-                            --output outputs/masks_tiled \
-                            --tile-size 640 --overlap 0.2 --visualize
+        --folder data/annotated/test/images --output outputs/masks_tiled
 
-    # Single image:
     python predict_tiled.py --weights outputs/weights/best.pt \
-                            --image data/annotated/test/images/img001.png
+        --image data/annotated/test/images/img001.png
 """
 
 import argparse
@@ -43,7 +33,7 @@ def visualize_prediction(image_path: str,
                          mask: np.ndarray,
                          save_path: str | None = None) -> None:
     """
-    Saves an overlay-only image (no extra panels).
+    Save a simple overlay image of the predicted mask.
     """
     original = cv2.imread(str(image_path), cv2.IMREAD_GRAYSCALE)
     if original is None:
@@ -70,7 +60,7 @@ def tile_coordinates(img_h: int,
                      tile_size: int,
                      overlap: float) -> list[tuple[int, int, int, int]]:
     """
-    Returns tile boxes as (x_start, y_start, x_end, y_end).
+    Return tile boxes as `(x_start, y_start, x_end, y_end)`.
     """
     if not (0.0 <= overlap < 1.0):
         raise ValueError(f"overlap must be in [0,1). Got {overlap}")
@@ -109,7 +99,7 @@ def predict_tile_mask(model,
                       iou_threshold: float,
                       tile_size: int) -> np.ndarray:
     """
-    Returns per-tile probability mask in [0,1], shape (tile_size, tile_size).
+    Predict one tile and return a mask in the range `[0, 1]`.
     """
     results = model.predict(
         source=tile_bgr,
@@ -150,7 +140,7 @@ def predict_single_image_tiled(model,
                                overlap: float = 0.2,
                                mask_threshold: float = 0.5) -> np.ndarray:
     """
-    Runs tiled inference on one full image and returns a full-size binary mask.
+    Run tiled inference on one image and return the final binary mask.
     """
     image = cv2.imread(str(image_path))
     if image is None:
@@ -207,7 +197,7 @@ def predict_folder_tiled(model,
                          mask_threshold: float = 0.5,
                          visualize: bool = False) -> dict:
     """
-    Runs tiled prediction on all images in a folder.
+    Run tiled prediction for every image in a folder.
     """
     folder = Path(folder_path)
     output = Path(output_dir)

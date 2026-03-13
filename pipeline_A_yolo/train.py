@@ -1,34 +1,8 @@
 """
-train_yolo.py - Pipeline A: YOLO Instance Segmentation Training
-===============================================================
-PURPOSE OF THIS FILE:
-    Fine-tunes a pretrained YOLO26 segmentation model on your tiled
-    dendrite dataset using transfer learning.
+Train the YOLO segmentation model on the tiled dendrite dataset.
 
-    What happens here:
-        1. Load pretrained YOLO26-seg weights (already knows edges, shapes, textures)
-        2. Feed it your tiled dendrite images + polygon labels
-        3. Model adjusts its weights to get better at detecting dendrites
-        4. Best weights are saved to outputs/weights/best.pt
-
-    You run this ONCE after tile_dataset.py has prepared the data.
-    Training takes ~10-30 minutes depending on your hardware.
-
-USAGE:
-    # Basic (uses all defaults):
-    python train_yolo.py
-
-    # Custom paths:
-    python train_yolo.py --data data/tiled/data.yaml --epochs 100 --output outputs/weights
-
-    # Resume interrupted training:
-    python train_yolo.py --resume outputs/weights/train/weights/last.pt
-
-HARDWARE NOTES:
-    - GPU (NVIDIA CUDA): strongly recommended, ~5-10x faster than CPU
-    - Apple Silicon (MPS): supported, faster than CPU
-    - CPU only: works but slow (~30-60 min for 100 epochs)
-    The code auto-detects which device to use.
+This script loads a pretrained YOLO model, trains it on the prepared dataset,
+and copies the best weights to `outputs/weights/best.pt` for later prediction.
 """
 
 import argparse
@@ -52,12 +26,10 @@ except ImportError:
 
 def get_device() -> str:
     """
-    Auto-detects the best available compute device.
-
-    Priority: CUDA GPU → Apple MPS → CPU
+    Pick the best available device for training.
 
     Returns:
-        Device string: '0' (first GPU), 'mps', or 'cpu'
+        Device string used by Ultralytics.
     """
     try:
         import torch
@@ -84,22 +56,16 @@ def get_device() -> str:
 
 def validate_dataset(data_yaml_path: str) -> dict:
     """
-    Validates that the dataset structure is correct before training starts.
-
-    Checks:
-        - data.yaml exists and is readable
-        - train/val/test image directories exist
-        - At least some images and labels are present
-        - Label files are non-empty (catches missing annotations)
+    Check that the dataset structure looks correct before training.
 
     Args:
-        data_yaml_path: Path to data.yaml from tile_dataset.py output
+        data_yaml_path: Path to `data.yaml`.
 
     Returns:
-        Parsed yaml dict if valid
+        Parsed yaml data.
 
     Raises:
-        AssertionError with descriptive message if anything is wrong
+        AssertionError: If the dataset is missing something important.
     """
     yaml_path = Path(data_yaml_path)
     assert yaml_path.exists(), \
@@ -166,16 +132,13 @@ def validate_dataset(data_yaml_path: str) -> dict:
 
 def build_train_config(args) -> dict:
     """
-    Builds the full training configuration dictionary.
-
-    Every parameter is documented here so you understand what each does.
-    These are passed directly to YOLO's train() method.
+    Build the config dictionary passed to `model.train()`.
 
     Args:
-        args: Parsed command-line arguments
+        args: Parsed command-line arguments.
 
     Returns:
-        Dictionary of training parameters
+        Training config dictionary.
     """
     return {
         # ── Data ────────────────────────────────────────────────────────────
@@ -314,20 +277,14 @@ def build_train_config(args) -> dict:
 
 def copy_best_weights(run_dir: Path, output_weights_dir: str) -> Path:
     """
-    Copies the best model weights to a predictable location for predict_tiled.py.
-
-    YOLO saves weights to: run_dir/weights/best.pt
-    We copy to: outputs/weights/best.pt
-
-    This means predict_tiled.py always knows exactly where to find the model,
-    regardless of which run number YOLO assigned to this training run.
+    Copy the best saved weights to a fixed output path.
 
     Args:
-        run_dir:             Path to the specific training run directory
-        output_weights_dir:  Where to copy best.pt
+        run_dir: Training run folder.
+        output_weights_dir: Folder where `best.pt` will be copied.
 
     Returns:
-        Path to the copied best.pt
+        Path to the copied weights file.
     """
     src = run_dir / 'weights' / 'best.pt'
     dst_dir = Path(output_weights_dir)
@@ -346,7 +303,7 @@ def copy_best_weights(run_dir: Path, output_weights_dir: str) -> Path:
 
 def resolve_run_dir(results, args) -> Path:
     """
-    Resolves the true run directory created by Ultralytics for this training run.
+    Find the run directory that Ultralytics created.
     """
     save_dir = getattr(results, 'save_dir', None)
     if save_dir:
@@ -369,12 +326,12 @@ def resolve_run_dir(results, args) -> Path:
 
 def print_training_summary(results, run_dir: Path, best_weights_path: Path) -> None:
     """
-    Prints a human-readable summary of training results.
+    Print a short summary after training finishes.
 
     Args:
-        results:            YOLO training results object
-        run_dir:            Path to the training run directory
-        best_weights_path:  Path to the saved best.pt
+        results: YOLO training results object.
+        run_dir: Training run directory.
+        best_weights_path: Copied best weights path.
     """
     print("\n" + "=" * 55)
     print("TRAINING COMPLETE")
@@ -410,15 +367,10 @@ def print_training_summary(results, run_dir: Path, best_weights_path: Path) -> N
 
 def train(args) -> None:
     """
-    Full training pipeline:
-        1. Validate dataset
-        2. Load pretrained YOLO26-seg model
-        3. Train with configured hyperparameters
-        4. Copy best weights to predictable location
-        5. Print summary
+    Run the full training pipeline.
 
     Args:
-        args: Parsed command-line arguments
+        args: Parsed command-line arguments.
     """
     print("=" * 55)
     print("PIPELINE A — YOLO26 TRAINING")

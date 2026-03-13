@@ -1,26 +1,8 @@
 """
-skeletonization.py - Pipeline B: Classic Computer Vision
-=========================================================
-PURPOSE OF THIS FILE:
-    Takes the clean binary mask from postprocessing and reduces every dendrite
-    branch down to a single-pixel-wide centerline — the "skeleton."
+Turn the clean dendrite mask into a 1-pixel-wide skeleton.
 
-    WHY DO WE NEED A SKELETON?
-        The binary mask tells us WHERE dendrites are, but not their structure.
-        A thick blob gives us no information about branch count, branch length,
-        or tip sharpness. The skeleton extracts the pure topology:
-            - How many branches are there?
-            - How long is each branch?
-            - Where are the tips? (dangerous sharp tips → battery failure risk)
-            - Where do branches fork?
-
-        These geometric measurements are what the battery engineers actually care about.
-
-STEPS IN ORDER:
-    1. Distance Transform   → each white pixel gets a value = distance to nearest edge
-    2. Watershed            → separates touching/merged branches using distance peaks
-    3. Skeletonization      → reduces each branch to a 1-pixel-wide centerline
-    4. Branch analysis      → counts tips, forks, and measures branch lengths
+This file also measures simple branch information like tip count, fork count,
+and total skeleton length.
 """
 
 import cv2
@@ -37,36 +19,13 @@ from pathlib import Path
 
 def apply_distance_transform(mask: np.ndarray) -> np.ndarray:
     """
-    Assigns each white pixel a value equal to its distance to the nearest
-    black pixel (background).
-
-    WHY WE NEED THIS:
-        The distance transform converts a flat binary mask into a
-        "topographic map" where:
-            - Pixels at the CENTER of thick branches have HIGH values
-              (they are far from any edge)
-            - Pixels at the EDGE of branches have LOW values (~1)
-            - Background pixels have value 0
-
-        This is useful for two reasons:
-            1. It feeds into Watershed to find branch centers
-            2. The local maxima of the distance transform are guaranteed
-               to lie on the medial axis (centerline) of each branch
-
-        Visually for a thick branch:
-            0 0 0 0 0 0 0 0
-            0 1 1 1 1 1 1 0
-            0 1 2 2 2 2 1 0   ← center pixels have value 2
-            0 1 2 3 3 2 1 0   ← very center has value 3
-            0 1 2 2 2 2 1 0
-            0 1 1 1 1 1 1 0
-            0 0 0 0 0 0 0 0
+    Compute the distance from each mask pixel to the nearest background pixel.
 
     Args:
-        mask: Clean binary mask (uint8, 0 or 255) from postprocessing
+        mask: Clean binary mask from postprocessing.
 
     Returns:
-        Float32 array of same shape, values = distance to nearest background pixel
+        Distance transform image.
     """
     # Normalize mask to 0/1 for distance transform
     binary = (mask > 0).astype(np.uint8)
@@ -86,40 +45,15 @@ def apply_watershed(mask: np.ndarray,
                     dist: np.ndarray,
                     peak_min_distance: int = 5) -> np.ndarray:
     """
-    Separates touching or merged dendrite branches using the Watershed algorithm.
-
-    THE PROBLEM IT SOLVES:
-        After postprocessing, two branches that grew close together may be
-        merged into one white blob. The skeleton of a merged blob produces
-        a single thick line instead of two separate branches — losing
-        topological information.
-
-        Watershed treats the distance transform as a topographic map and
-        "floods" it from local peaks (branch centers), creating boundaries
-        where two flood regions meet.
-
-    HOW IT WORKS:
-        1. Find local maxima of the distance transform
-           → these are the centers of branches (furthest from any edge)
-        2. Label each maximum as a separate "seed"
-        3. Grow each seed outward (flood uphill in the distance map)
-        4. Where two growing regions meet → draw a boundary
-        5. Result: each originally-merged branch gets its own labeled region
-
-    PEAK_MIN_DISTANCE:
-        Minimum number of pixels between two peaks to be considered separate.
-        Too small → finds noise peaks, over-segments one branch into many
-        Too large → misses real separate branches, under-segments
-        5 is a safe default for SEM images at standard resolution.
+    Use watershed to split touching regions when possible.
 
     Args:
-        mask:              Clean binary mask from postprocessing
-        dist:              Distance transform from apply_distance_transform()
-        peak_min_distance: Minimum distance between watershed seed peaks
+        mask: Clean binary mask.
+        dist: Distance transform of the mask.
+        peak_min_distance: Minimum spacing between detected peaks.
 
     Returns:
-        Label map (int32) where each separated region has a unique integer ID.
-        Background = 0, first branch = 1, second branch = 2, etc.
+        Labeled watershed regions.
     """
     from skimage.feature import peak_local_max
 
@@ -150,38 +84,13 @@ def apply_watershed(mask: np.ndarray,
 
 def apply_skeletonization(mask: np.ndarray) -> np.ndarray:
     """
-    Reduces all white regions to single-pixel-wide centerlines.
-
-    HOW SKELETONIZATION WORKS:
-        The algorithm iteratively removes pixels from the border of white regions
-        — but ONLY if removing them doesn't change the topology (connectivity).
-
-        A pixel can be removed if:
-            - It is on the border (has at least one black neighbor)
-            - Removing it does NOT disconnect any remaining white pixels
-            - Removing it does NOT create a hole
-
-        This continues until no more pixels can be removed — what remains
-        is the thinnest possible representation that preserves the original
-        connectivity and branching structure.
-
-        Before:              After:
-        ████████             ────────
-        ████████    →            │
-        ████                 ────┘
-        ████
-        (thick blob)         (1-pixel centerlines)
-
-    NOTE ON WATERSHED + SKELETONIZATION:
-        We skeletonize the ORIGINAL mask (not the watershed labels) because
-        watershed is only used to count/separate branches for analysis.
-        Skeletonization on the full mask gives cleaner centerlines.
+    Reduce the mask to single-pixel-wide centerlines.
 
     Args:
-        mask: Clean binary mask (uint8, 0 or 255)
+        mask: Clean binary mask.
 
     Returns:
-        Boolean array of same shape — True = skeleton pixel, False = background
+        Skeleton image.
     """
     binary = (mask > 0)
 
@@ -197,46 +106,13 @@ def apply_skeletonization(mask: np.ndarray) -> np.ndarray:
 
 def analyze_skeleton(skeleton: np.ndarray) -> dict:
     """
-    Extracts geometric measurements from the skeleton.
-
-    WHAT WE MEASURE AND WHY:
-
-        TIPS (endpoints):
-            A skeleton pixel with exactly 1 neighbor is a branch tip.
-            Tips represent the growing front of dendrites — sharp, isolated tips
-            are the primary puncture risk for the battery separator.
-            More tips = higher risk.
-
-        FORKS (junction points):
-            A skeleton pixel with 3 or more neighbors is a branch junction.
-            Fork count gives us the branching complexity of the dendrite tree.
-
-        BRANCH COUNT:
-            Approximated as: tips / 2 + forks
-            (Each branch has 2 endpoints unless it's a loop)
-
-        TOTAL LENGTH:
-            Total number of skeleton pixels ≈ total centerline length in pixels.
-            Multiply by the image's nm/pixel scale factor to get physical length.
-
-    HOW NEIGHBOR COUNTING WORKS:
-        For each skeleton pixel, we count how many of its 8 neighbors
-        are also skeleton pixels. This gives the "connectivity" of that pixel:
-            1 neighbor  → tip (dead end)
-            2 neighbors → middle of a branch (pass-through)
-            3+ neighbors → fork (junction)
+    Measure simple properties from the skeleton.
 
     Args:
-        skeleton: Binary skeleton array (uint8, 0 or 255)
+        skeleton: Binary skeleton image.
 
     Returns:
-        Dictionary with keys:
-            'tips'         → binary mask of tip pixels
-            'forks'        → binary mask of fork pixels
-            'tip_count'    → integer count of tips
-            'fork_count'   → integer count of forks
-            'total_length' → total skeleton pixel count
-            'tip_coords'   → (N, 2) array of tip pixel coordinates [row, col]
+        Dictionary with tip mask, fork mask, and summary numbers.
     """
     binary = (skeleton > 0).astype(np.uint8)
 
@@ -279,18 +155,14 @@ def analyze_skeleton(skeleton: np.ndarray) -> dict:
 def skeletonize_mask(mask: np.ndarray,
                      peak_min_distance: int = 5) -> dict:
     """
-    Runs the full skeletonization pipeline on a postprocessed binary mask.
+    Run the full skeletonization pipeline.
 
     Args:
-        mask:              Clean binary mask from postprocessing.py
-        peak_min_distance: Watershed seed separation (default 5)
+        mask: Clean mask from postprocessing.
+        peak_min_distance: Minimum peak spacing for watershed.
 
     Returns:
-        Dictionary with keys:
-            'dist'       → distance transform (float32)
-            'watershed'  → watershed label map (int32)
-            'skeleton'   → single-pixel centerlines (uint8, 0 or 255)
-            'analysis'   → dict from analyze_skeleton() with tip/fork counts
+        Dictionary with intermediate outputs and analysis results.
     """
     dist      = apply_distance_transform(mask)
     watershed = apply_watershed(mask, dist, peak_min_distance)
@@ -313,12 +185,12 @@ def visualize_steps(original_mask: np.ndarray,
                     results: dict,
                     save_path = None) -> None:
     """
-    Plots skeletonization results with tips and forks marked.
+    Show skeletonization results and mark tips and forks.
 
     Args:
-        original_mask: The postprocessed binary mask (for overlay context)
-        results:       Dictionary returned by skeletonize_mask()
-        save_path:     If provided, saves the figure to this path
+        original_mask: Clean binary mask.
+        results: Output from `skeletonize_mask()`.
+        save_path: Optional path to save the figure.
     """
     import matplotlib.pyplot as plt
 
@@ -371,12 +243,7 @@ def save_skeleton_overlay(original_image: np.ndarray,
                           alpha: float = 0.4,
                           thickness: int = 2) -> None:
     """
-    Saves a standalone overlay of skeleton/tips/forks over the original image.
-
-    Colors:
-        skeleton -> green
-        tips     -> red
-        forks    -> blue
+    Save a simple overlay of the skeleton, tips, and forks.
     """
     if original_image.dtype != np.uint8:
         base = cv2.normalize(original_image, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)

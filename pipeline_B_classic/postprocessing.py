@@ -1,24 +1,8 @@
 """
-postprocessing.py - Pipeline B: Classic Computer Vision
-========================================================
-PURPOSE OF THIS FILE:
-    The binary mask from segmentation.py is correct in its broad strokes but
-    imperfect in the details. It contains:
-        - Small isolated noise speckles (background bubbles, charge artifacts)
-        - Holes inside dendrite bodies (gaps where threshold missed bright pixels)
-        - Broken thin branches (disconnected segments of the same branch)
+Clean the segmentation mask before skeletonization.
 
-    This file fixes all of those problems using morphological operations —
-    mathematical tools that work on the SHAPE and CONNECTIVITY of white regions,
-    not on pixel brightness values.
-
-    Think of this as the "quality control" stage before skeletonization.
-
-STEPS IN ORDER:
-    1. Remove small components   → kill noise speckles by size
-    2. Morphological closing     → fill holes inside dendrite bodies
-    3. Morphological reconstruction → recover thin branches lost in closing
-                                      while rejecting noise not connected to main structure
+This file removes small noise, fills small gaps, and gives back a cleaner mask
+for the structure analysis step.
 """
 
 import cv2
@@ -33,38 +17,14 @@ from skimage.morphology import reconstruction
 def remove_small_components(mask: np.ndarray,
                              min_area: int = 50) -> np.ndarray:
     """
-    Removes small isolated white regions (noise) from the binary mask.
-
-    WHY THIS WORKS:
-        Dendrites are physically large connected structures — a real dendrite
-        branch will always occupy more than a handful of pixels at SEM resolution.
-        Small isolated white blobs (< min_area pixels) are almost certainly:
-            - Background bubble highlights
-            - Charging artifacts
-            - Noise that survived thresholding
-
-        By finding all connected white regions and deleting the small ones,
-        we clean up the majority of background noise in one pass.
-
-    HOW CONNECTED COMPONENTS WORK:
-        Imagine flooding the white regions of the mask with water.
-        Each separate "island" of white pixels that you can reach without
-        crossing a black pixel is one connected component.
-        We measure each island's area and delete those below min_area.
-
-    CHOOSING min_area:
-        Too small (< 30):  some noise survives
-        50 (default):      safe for most SEM images at standard resolution
-        Too large (> 200): risk deleting real thin branch tips
-
-        If your images are very high resolution, scale this up proportionally.
+    Remove tiny connected regions that are probably noise.
 
     Args:
-        mask:     Binary mask (uint8, 0 or 255) from segmentation
-        min_area: Minimum pixel area to keep (smaller regions are deleted)
+        mask: Binary mask from segmentation.
+        min_area: Minimum component area to keep.
 
     Returns:
-        Cleaned binary mask, same shape as input
+        Cleaned mask.
     """
     # Label every connected white region with a unique integer ID
     # num_labels = total number of regions found (including background=0)
@@ -92,9 +52,7 @@ def remove_small_components(mask: np.ndarray,
 
 def get_adaptive_kernel_size(mask: np.ndarray) -> int:
     """
-    Chooses closing kernel size based on the average white region size.
-    Large dense regions (Type 2) → bigger kernel
-    Small sparse regions (Type 1) → smaller kernel
+    Choose a closing kernel size from the mask content.
     """
     num_labels, _, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
     
@@ -115,42 +73,14 @@ def get_adaptive_kernel_size(mask: np.ndarray) -> int:
 def apply_closing(mask: np.ndarray,
                   kernel_size: int = -1) -> np.ndarray:
     """
-    Fills small holes inside dendrite bodies and bridges tiny gaps.
-
-    WHY WE NEED THIS:
-        After thresholding, dendrite bodies often have small black holes inside
-        them — pixels where the local brightness dipped just below the threshold.
-        These holes would become spurious loops in the skeleton if not filled.
-
-        Closing also bridges tiny black gaps between two white regions that
-        are physically part of the same branch but got disconnected.
-
-    HOW CLOSING WORKS:
-        Closing = Dilation followed by Erosion with the same kernel.
-
-        Dilation first EXPANDS all white regions outward by kernel_size/2 pixels.
-        This expansion fills holes and bridges gaps.
-
-        Erosion then SHRINKS all white regions back by the same amount.
-        This restores the original size/shape of dendrites, but the holes
-        that were filled by dilation are now too small to re-open — they stay filled.
-
-        Visually:
-            Before:  █ █ █ _ █ █ █    (_ = hole inside dendrite)
-            Dilate:  █ █ █ █ █ █ █    (gap filled)
-            Erode:   █ █ █ █ █ █ █    (hole stays closed, size restored)
-
-    KERNEL SIZE:
-        Controls the maximum hole size that gets filled.
-        5 = fills holes up to ~5px diameter (safe default)
-        Too large: merges separate dendrite branches into one blob
+    Fill small holes and connect small gaps in the mask.
 
     Args:
-        mask:        Binary mask after small component removal
-        kernel_size: Size of the structuring element (must be odd)
+        mask: Binary mask after removing small components.
+        kernel_size: Closing kernel size. If negative, pick automatically.
 
     Returns:
-        Mask with holes filled and small gaps bridged
+        Mask after closing.
     """
     if kernel_size <= 0:
         kernel_size = get_adaptive_kernel_size(mask)
@@ -172,54 +102,14 @@ def apply_morphological_reconstruction(mask: np.ndarray,
                                         erosion_size: int = 5,
                                         iters: int = 3) -> np.ndarray:
     """
-    Recovers thin branches lost during closing while rejecting noise.
-
-    THE PROBLEM WITH CLOSING ALONE:
-        Closing fills holes, but it also slightly thickens and merges nearby
-        thin branches. More importantly, it can't distinguish between:
-            A) a thin real branch that got partially erased during thresholding
-            B) a noise speckle that happens to be near a real dendrite
-
-        Morphological reconstruction solves this by asking:
-        "Is this white region REACHABLE from a definitely-real part of the dendrite?"
-
-    HOW IT WORKS — TWO IMAGES:
-
-        MASK (the "ceiling"):
-            The closed binary mask from Step 2.
-            Defines the maximum extent white regions are allowed to grow.
-            Nothing can grow beyond the mask boundary.
-
-        MARKER (the "seeds"):
-            The mask after aggressive erosion — only the thick, certain core
-            parts of dendrites survive. Thin branches and noise are both gone.
-            These are our "guaranteed real dendrite" starting points.
-
-        RECONSTRUCTION PROCESS:
-            Iteratively dilate the marker, but never exceed the mask.
-            The marker grows outward from its seeds, reclaiming thin branches
-            that are connected to the main structure.
-            Noise speckles that are NOT connected to any seed never get reclaimed —
-            they stay dark even if they're inside the mask boundary.
-
-        Visually:
-            Mask:    ██ ████████ ████  (includes noise on the right)
-            Marker:     ██████         (only thick core, noise gone)
-            Result:  ████████████      (branches recovered, noise rejected)
-                                ████  ← this isolated region never gets reclaimed
-
-    EROSION SIZE:
-        Controls how aggressively the marker is created.
-        3 (default): removes thin branches AND noise, keeps thick cores
-        Too small (1): marker too similar to mask, reconstruction doesn't help
-        Too large (7+): destroys too much, thin branches never get reclaimed
+    Recover useful thin branches after closing.
 
     Args:
-        mask:         Binary mask after closing (Step 2)
-        erosion_size: Size of erosion kernel for creating the marker
-        iters:         Number of iterations for reconstruction
+        mask: Binary mask after closing.
+        erosion_size: Erosion kernel size used to build the marker.
+        iters: Number of erosion iterations.
     Returns:
-        Reconstructed mask — thin branches recovered, isolated noise rejected
+        Reconstructed mask.
     """
     # Normalize to [0, 1] for skimage's reconstruction function
     mask_normalized = (mask > 0).astype(np.uint8)
@@ -256,21 +146,17 @@ def postprocess(mask: np.ndarray,
                 erosion_size: int = 5,
                 iters: int = 3) -> dict:
     """
-    Runs the full postprocessing pipeline on a binary segmentation mask.
+    Run the full postprocessing pipeline.
 
     Args:
-        mask:           Binary mask from segmentation.py (uint8, 0 or 255)
-        min_area:       Minimum component area to keep
-        closing_kernel: Kernel size for morphological closing
-        erosion_size:   Erosion size for reconstruction marker
-        iters:          Number of iterations for reconstruction
+        mask: Binary mask from segmentation.
+        min_area: Minimum component area to keep.
+        closing_kernel: Kernel size for closing.
+        erosion_size: Erosion size for the reconstruction marker.
+        iters: Number of reconstruction iterations.
 
     Returns:
-        Dictionary with intermediate results:
-            'input'           → original segmentation mask
-            'no_small'        → after small component removal
-            'closed'          → after morphological closing
-            'reconstructed'   → final clean mask (READY FOR SKELETONIZATION)
+        Dictionary with the mask from each step.
     """
     no_small = remove_small_components(mask, min_area)
     closed = apply_closing(no_small, closing_kernel)
@@ -290,11 +176,11 @@ def postprocess(mask: np.ndarray,
 
 def visualize_steps(results: dict, save_path = None) -> None:
     """
-    Plots all postprocessing steps side by side for inspection.
+    Show all postprocessing steps side by side.
 
     Args:
-        results:   Dictionary returned by postprocess()
-        save_path: If provided, saves the figure to this path
+        results: Output from `postprocess()`.
+        save_path: Optional path to save the figure.
     """
     import matplotlib.pyplot as plt
 
