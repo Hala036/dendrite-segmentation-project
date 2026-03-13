@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 import cv2
 import numpy as np
 import matplotlib
@@ -7,11 +8,12 @@ import matplotlib.pyplot as plt
 
 
 ROOT = Path(__file__).resolve().parent
+REPO_ROOT = ROOT.parent
 
 ORIG_DIR = ROOT / 'classic' / 'original'
-CLASSIC_MASK_DIR = ROOT / 'classic' / 'mask_overlay'
-YOLO_OVERLAY_DIR = ROOT / 'yolo_tiled' / 'overlays'
-SKELETON_DIR = ROOT / 'classic' / 'skeleton_overlay'
+CLASSIC_MASK_DIR = REPO_ROOT / 'outputs' / 'masks'
+YOLO_MASK_DIR = REPO_ROOT / 'outputs' / 'masks_tiled'
+SKELETON_DIR = REPO_ROOT / 'outputs' / 'skeletons'
 
 OUT_DIR = ROOT / 'artifacts_combined'
 OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -28,12 +30,35 @@ def get_base_name(original_name: str) -> str:
     return original_name.replace('_original.png', '')
 
 
+def resolve_classic_stem(base: str) -> str:
+    exact = CLASSIC_MASK_DIR / f'{base}_mask.png'
+    if exact.exists():
+        return f'{base}_mask'
+
+    match_2e9 = re.match(r'^2e-9_100s_(\d+)_', base)
+    if match_2e9:
+        return match_2e9.group(1) + '_mask'
+
+    match_70nm = re.match(r'^70nm_diameter_100nm_pitch_(\d+)_', base)
+    if match_70nm:
+        return f'70nm_diameter_{match_70nm.group(1)}_mask'
+
+    match_ag = re.match(r'^Ag_2e?-?9?_?(\d+[a-z]?)_', base, re.IGNORECASE)
+    if match_ag:
+        return f'Ag_{match_ag.group(1)}_mask'
+
+    return f'{base}_mask'
+
+
 def find_expected_files(base: str) -> dict:
+    classic_stem = resolve_classic_stem(base)
+    skeleton_stem = classic_stem.replace('_mask', '_skeleton')
+
     return {
         'original': ORIG_DIR / f'{base}_original.png',
-        'classic_mask': CLASSIC_MASK_DIR / f'{base}_mask_overlay.png',
-        'yolo': YOLO_OVERLAY_DIR / f'{base}_tiled_overlay.png',
-        'skeleton': SKELETON_DIR / f'{base}_skeleton_overlay.png',
+        'classic_mask': CLASSIC_MASK_DIR / f'{classic_stem}.png',
+        'yolo': YOLO_MASK_DIR / f'{base}_yolo_tiled_mask.png',
+        'skeleton': SKELETON_DIR / f'{skeleton_stem}.png',
     }
 
 
@@ -47,17 +72,17 @@ def combine_one(base: str) -> Path:
     original = read_rgb(files['original'])
     h, w = original.shape[:2]
 
-    classic_mask = cv2.resize(read_rgb(files['classic_mask']), (w, h), interpolation=cv2.INTER_LINEAR)
-    yolo = cv2.resize(read_rgb(files['yolo']), (w, h), interpolation=cv2.INTER_LINEAR)
-    skeleton = cv2.resize(read_rgb(files['skeleton']), (w, h), interpolation=cv2.INTER_LINEAR)
+    classic_mask = cv2.resize(read_rgb(files['classic_mask']), (w, h), interpolation=cv2.INTER_NEAREST)
+    yolo = cv2.resize(read_rgb(files['yolo']), (w, h), interpolation=cv2.INTER_NEAREST)
+    skeleton = cv2.resize(read_rgb(files['skeleton']), (w, h), interpolation=cv2.INTER_NEAREST)
 
     out_path = OUT_DIR / f'{base}_artifact.png'
 
     panels = [
         ('Original', original),
-        ('Classic Mask Overlay', classic_mask),
-        ('YOLO Overlay', yolo),
-        ('Skeleton Overlay', skeleton),
+        ('Classic Mask', classic_mask),
+        ('YOLO Mask', yolo),
+        ('Skeleton', skeleton),
     ]
 
     fig, axes = plt.subplots(1, 4, figsize=(20, 6))
