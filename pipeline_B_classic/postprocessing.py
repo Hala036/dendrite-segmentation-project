@@ -136,6 +136,62 @@ def apply_morphological_reconstruction(mask: np.ndarray,
     return result
 
 
+def filter_unreasonable_components(mask: np.ndarray,
+                                   enabled: bool = False,
+                                   bottom_fraction: float = 0.16,
+                                   bottom_min_width_fraction: float = 0.45,
+                                   large_area_threshold: int = 5000,
+                                   solidity_threshold: float = 0.85,
+                                   max_compact_aspect_ratio: float = 1.8) -> np.ndarray:
+    """
+    Remove components that look more like blobs or electrode base than dendrites.
+
+    The rules are intentionally simple:
+    - remove very wide components attached to the bottom edge
+    - remove very large compact components with high solidity
+    """
+    if not enabled:
+        return mask.copy()
+
+    num_labels, labeled, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    h, w = mask.shape
+    filtered = np.zeros_like(mask)
+
+    for i in range(1, num_labels):
+        x, y, width, height, area = stats[i]
+        component = (labeled == i).astype(np.uint8)
+
+        touches_bottom = (y + height) >= h - 1
+        width_fraction = width / max(w, 1)
+        aspect_ratio = max(width, height) / max(1, min(width, height))
+
+        contours, _ = cv2.findContours(component, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if contours:
+            contour = max(contours, key=cv2.contourArea)
+            hull = cv2.convexHull(contour)
+            hull_area = cv2.contourArea(hull)
+            solidity = area / hull_area if hull_area > 0 else 0.0
+        else:
+            solidity = 0.0
+
+        remove = False
+
+        if (touches_bottom and
+                y >= int(h * (1.0 - bottom_fraction)) and
+                width_fraction >= bottom_min_width_fraction):
+            remove = True
+
+        if (area >= large_area_threshold and
+                solidity >= solidity_threshold and
+                aspect_ratio <= max_compact_aspect_ratio):
+            remove = True
+
+        if not remove:
+            filtered[labeled == i] = 255
+
+    return filtered
+
+
 # ==============================================================================
 # MASTER FUNCTION
 # ==============================================================================
@@ -144,7 +200,13 @@ def postprocess(mask: np.ndarray,
                 min_area: int = 300,
                 closing_kernel: int = -1,
                 erosion_size: int = 5,
-                iters: int = 3) -> dict:
+                iters: int = 3,
+                apply_shape_filter: bool = False,
+                bottom_fraction: float = 0.16,
+                bottom_min_width_fraction: float = 0.45,
+                large_area_threshold: int = 5000,
+                solidity_threshold: float = 0.85,
+                max_compact_aspect_ratio: float = 1.8) -> dict:
     """
     Run the full postprocessing pipeline.
 
@@ -154,6 +216,12 @@ def postprocess(mask: np.ndarray,
         closing_kernel: Kernel size for closing.
         erosion_size: Erosion size for the reconstruction marker.
         iters: Number of reconstruction iterations.
+        apply_shape_filter: If True, remove unreasonable large compact regions.
+        bottom_fraction: Bottom band used by the electrode-base rule.
+        bottom_min_width_fraction: Minimum width fraction for bottom-edge removal.
+        large_area_threshold: Minimum area for the blob filter.
+        solidity_threshold: Minimum solidity for the blob filter.
+        max_compact_aspect_ratio: Maximum aspect ratio for the blob filter.
 
     Returns:
         Dictionary with the mask from each step.
@@ -161,12 +229,22 @@ def postprocess(mask: np.ndarray,
     no_small = remove_small_components(mask, min_area)
     closed = apply_closing(no_small, closing_kernel)
     reconstructed = apply_morphological_reconstruction(closed, erosion_size, iters)
+    filtered = filter_unreasonable_components(
+        reconstructed,
+        enabled=apply_shape_filter,
+        bottom_fraction=bottom_fraction,
+        bottom_min_width_fraction=bottom_min_width_fraction,
+        large_area_threshold=large_area_threshold,
+        solidity_threshold=solidity_threshold,
+        max_compact_aspect_ratio=max_compact_aspect_ratio,
+    )
 
     return {
         'input': mask,
         'no_small': no_small,
         'closed': closed,
-        'reconstructed': reconstructed    # <-- this is what skeletonization.py receives
+        'reconstructed': reconstructed,
+        'filtered': filtered,
     }
 
 
@@ -185,10 +263,10 @@ def visualize_steps(results: dict, save_path = None) -> None:
     import matplotlib.pyplot as plt
 
     titles = ['Segmentation Input', 'Small Components Removed',
-              'After Closing', 'After Reconstruction']
-    keys   = ['input', 'no_small', 'closed', 'reconstructed']
+              'After Closing', 'After Reconstruction', 'After Shape Filter']
+    keys   = ['input', 'no_small', 'closed', 'reconstructed', 'filtered']
 
-    fig, axes = plt.subplots(1, 4, figsize=(20, 5))
+    fig, axes = plt.subplots(1, 5, figsize=(24, 5))
 
     for ax, key, title in zip(axes, keys, titles):
         ax.imshow(results[key], cmap='gray')

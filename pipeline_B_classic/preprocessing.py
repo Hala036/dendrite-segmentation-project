@@ -45,6 +45,8 @@ def crop_metadata_bar(image: np.ndarray, crop_fraction: float = 0.065) -> np.nda
     """
     Remove the SEM metadata bar at the bottom of the image.
     """
+    if crop_fraction <= 0:
+        return image
     h = image.shape[0]
     crop_pixels = int(h * crop_fraction)
     return image[:h - crop_pixels, :]
@@ -142,6 +144,7 @@ def apply_bilateral_filter(image: np.ndarray,
 # ==============================================================================
 
 def preprocess(image_path: str,
+               crop_fraction: float = 0.065,
                clahe_clip: float = 2.0,
                clahe_tile: int = 8,
                bilateral_d: int = 9,
@@ -151,6 +154,7 @@ def preprocess(image_path: str,
 
     Args:
         image_path: Path to the raw image.
+        crop_fraction: Fraction of bottom rows to crop. Use `0.0` to disable.
         clahe_clip: CLAHE clip limit.
         clahe_tile: CLAHE tile size.
         bilateral_d: Bilateral filter diameter.
@@ -160,7 +164,7 @@ def preprocess(image_path: str,
         Dictionary with images from each step.
     """
     raw = load_image(image_path)
-    raw = crop_metadata_bar(raw)  # Remove SEM metadata bar before any processing
+    raw = crop_metadata_bar(raw, crop_fraction)
     normalized = normalize_histogram(raw)
     clahe_result = apply_clahe(normalized, clahe_clip, clahe_tile)
     denoised = apply_bilateral_filter(clahe_result, bilateral_d, bilateral_sigma)

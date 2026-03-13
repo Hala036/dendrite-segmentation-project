@@ -27,9 +27,9 @@ ROOT = Path(__file__).parent
 DATA_DIR = ROOT / 'data' / 'annotated' / 'test' / 'images'  # dataset images, not raw
 OUT_ROOT = ROOT / 'comparison_results' / 'classic'
 
-ORIG_DIR = OUT_ROOT / 'original'
-MASK_OVERLAY_DIR = OUT_ROOT / 'mask_overlay'
-SKEL_OVERLAY_DIR = OUT_ROOT / 'skeleton_overlay'
+ORIG_DIR = OUT_ROOT / 'original1'
+MASK_OVERLAY_DIR = OUT_ROOT / 'mask_overlay1'
+SKEL_OVERLAY_DIR = OUT_ROOT / 'skeleton_overlay1'
 
 for d in [ORIG_DIR, MASK_OVERLAY_DIR, SKEL_OVERLAY_DIR]:
     d.mkdir(parents=True, exist_ok=True)
@@ -38,6 +38,7 @@ IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.tif', '.tiff', '.bmp'}
 
 PARAMS = {
     # preprocessing
+    'crop_fraction': 0.0,
     'clahe_clip': 2.0,
     'clahe_tile': 8,
     'bilateral_d': 9,
@@ -52,7 +53,13 @@ PARAMS = {
     'min_area': 300,
     'closing_kernel': -1,
     'erosion_size': 5,
-    'iters': 3,
+    'iters': 2,
+    'apply_shape_filter': True,
+    'bottom_fraction': 0.16,
+    'bottom_min_width_fraction': 0.45,
+    'large_area_threshold': 5000,
+    'solidity_threshold': 0.85,
+    'max_compact_aspect_ratio': 1.8,
 
     # skeletonization
     'peak_min_distance': 5,
@@ -82,6 +89,7 @@ def main() -> None:
         # a) preprocess includes metadata-bar crop; this is our "original"
         pre = preprocess(
             str(image_path),
+            crop_fraction=PARAMS['crop_fraction'],
             clahe_clip=PARAMS['clahe_clip'],
             clahe_tile=PARAMS['clahe_tile'],
             bilateral_d=PARAMS['bilateral_d'],
@@ -103,17 +111,23 @@ def main() -> None:
             closing_kernel=PARAMS['closing_kernel'],
             erosion_size=PARAMS['erosion_size'],
             iters=PARAMS['iters'],
+            apply_shape_filter=PARAMS['apply_shape_filter'],
+            bottom_fraction=PARAMS['bottom_fraction'],
+            bottom_min_width_fraction=PARAMS['bottom_min_width_fraction'],
+            large_area_threshold=PARAMS['large_area_threshold'],
+            solidity_threshold=PARAMS['solidity_threshold'],
+            max_compact_aspect_ratio=PARAMS['max_compact_aspect_ratio'],
         )
         save_mask_overlay(
             preprocessed_image=original,
-            mask=post['reconstructed'],
+            mask=post['filtered'],
             save_path=str(MASK_OVERLAY_DIR / f"{stem}_mask_overlay.png"),
             alpha=0.4,
         )
 
         # c) skeletonize and overlay thicker skeleton on original
         skel = skeletonize_mask(
-            post['reconstructed'],
+            post['filtered'],
             peak_min_distance=PARAMS['peak_min_distance'],
         )
         save_skeleton_overlay(

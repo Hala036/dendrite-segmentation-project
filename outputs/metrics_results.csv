@@ -1,0 +1,11 @@
+image,pipeline,iou,dice,precision,recall
+2e-9_100s_019_png_jpg.rf.b4efef9d266371373c001e722b3a6cdb.jpg,Classic,0.6955,0.8204,0.9897,0.7005
+2e-9_100s_019_png_jpg.rf.b4efef9d266371373c001e722b3a6cdb.jpg,YOLO,0.8748,0.9332,0.9481,0.9189
+2e-9_100s_020_png_jpg.rf.28e6c8afce1ee097aed6472ab4c5fe32.jpg,Classic,0.6452,0.7843,0.9796,0.654
+2e-9_100s_020_png_jpg.rf.28e6c8afce1ee097aed6472ab4c5fe32.jpg,YOLO,0.8708,0.931,0.8939,0.9713
+70nm_diameter_100nm_pitch_018_png_jpg.rf.14ff5a098b7670efd72a3c414831e6ae.jpg,Classic,0.4044,0.5759,0.4115,0.9592
+70nm_diameter_100nm_pitch_018_png_jpg.rf.14ff5a098b7670efd72a3c414831e6ae.jpg,YOLO,0.0,0.0,0.0,0.0
+70nm_diameter_100nm_pitch_020_png_jpg.rf.c0cd080921e33287c758b1ea9d8d9368.jpg,Classic,0.1545,0.2677,0.1835,0.4944
+70nm_diameter_100nm_pitch_020_png_jpg.rf.c0cd080921e33287c758b1ea9d8d9368.jpg,YOLO,0.8199,0.9011,0.8712,0.9331
+70nm_diameter_100nm_pitch_021_png_jpg.rf.8b0cda18515211137f806f7eae5d6361.jpg,Classic,0.5187,0.6831,0.8511,0.5704
+70nm_diameter_100nm_pitch_021_png_jpg.rf.8b0cda18515211137f806f7eae5d6361.jpg,YOLO,0.6297,0.7728,0.6776,0.8991
