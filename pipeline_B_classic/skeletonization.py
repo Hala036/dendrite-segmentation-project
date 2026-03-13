@@ -28,6 +28,7 @@ import numpy as np
 from skimage.morphology import skeletonize
 from skimage.measure import label, regionprops
 from scipy import ndimage
+from pathlib import Path
 
 
 # ==============================================================================
@@ -364,6 +365,47 @@ def visualize_steps(original_mask: np.ndarray,
     plt.show()
 
 
+def save_skeleton_overlay(original_image: np.ndarray,
+                          results: dict,
+                          save_path: str,
+                          alpha: float = 0.4,
+                          thickness: int = 2) -> None:
+    """
+    Saves a standalone overlay of skeleton/tips/forks over the original image.
+
+    Colors:
+        skeleton -> green
+        tips     -> red
+        forks    -> blue
+    """
+    if original_image.dtype != np.uint8:
+        base = cv2.normalize(original_image, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+    else:
+        base = original_image.copy()
+
+    skeleton = (results['skeleton'] > 0).astype(np.uint8) * 255
+    tips = (results['analysis']['tips'] > 0).astype(np.uint8) * 255
+    forks = (results['analysis']['forks'] > 0).astype(np.uint8) * 255
+
+    if thickness > 1:
+        k = np.ones((thickness, thickness), dtype=np.uint8)
+        skeleton = cv2.dilate(skeleton, k, iterations=1)
+        tips = cv2.dilate(tips, k, iterations=1)
+        forks = cv2.dilate(forks, k, iterations=1)
+
+    overlay = cv2.cvtColor(base, cv2.COLOR_GRAY2RGB)
+    overlay[skeleton > 0] = [0, 255, 0]
+    overlay[tips > 0] = [255, 0, 0]
+    overlay[forks > 0] = [0, 0, 255]
+
+    blended = cv2.addWeighted(cv2.cvtColor(base, cv2.COLOR_GRAY2RGB), 1.0 - alpha, overlay, alpha, 0)
+
+    out = Path(save_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(str(out), cv2.cvtColor(blended, cv2.COLOR_RGB2BGR))
+    print(f"Saved overlay to {out}")
+
+
 # ==============================================================================
 # QUICK TEST
 # ==============================================================================
@@ -384,7 +426,7 @@ if __name__ == "__main__":
 
     prep  = preprocess(image_path)
     seg   = segment(prep['denoised'])
-    post  = postprocess(seg['final_mask'])
+    post  = postprocess(seg['mask'])
     skel  = skeletonize_mask(post['reconstructed'])
 
     a = skel['analysis']
@@ -394,3 +436,8 @@ if __name__ == "__main__":
 
     visualize_steps(post['reconstructed'], skel,
                     save_path="outputs/visuals/skeletonization_check.png")
+    save_skeleton_overlay(
+        original_image=prep['raw'],
+        results=skel,
+        save_path="outputs/visuals/skeletonization_overlay.png"
+    )

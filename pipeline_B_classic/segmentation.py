@@ -279,6 +279,30 @@ def visualize_segmentation(preprocessed_image: np.ndarray,
     plt.show()
 
 
+def save_mask_overlay(preprocessed_image: np.ndarray,
+                      mask: np.ndarray,
+                      save_path: str,
+                      alpha: float = 0.4) -> None:
+    """
+    Saves a standalone overlay image (no multi-panel figure).
+
+    Green pixels indicate predicted dendrite mask over the preprocessed input.
+    """
+    gray = preprocessed_image
+    if gray.dtype != np.uint8:
+        gray = cv2.normalize(gray, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+
+    rgb = cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
+    overlay = rgb.copy()
+    overlay[mask > 0] = [0, 200, 0]
+    blended = cv2.addWeighted(rgb, 1.0 - alpha, overlay, alpha, 0)
+
+    out_path = Path(save_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(str(out_path), cv2.cvtColor(blended, cv2.COLOR_RGB2BGR))
+    print(f"Saved overlay to {out_path}")
+
+
 # ==============================================================================
 # PARAMETER TUNING HELPER
 # ==============================================================================
@@ -348,6 +372,11 @@ if __name__ == "__main__":
         denoised,
         seg_results,
         save_path="outputs/visuals/segmentation_check.png"
+    )
+    save_mask_overlay(
+        preprocessed_image=denoised,
+        mask=seg_results['mask'],
+        save_path="outputs/visuals/segmentation_overlay.png"
     )
 
     # Uncomment to explore parameter tuning:
