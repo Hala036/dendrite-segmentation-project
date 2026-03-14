@@ -1,0 +1,13 @@
+names:
+- Dendrite
+nc: 1
+path: /Users/halaabutair/Desktop/Year 4/Image Processing/dendrite-segmentation/data/tiled
+roboflow:
+  license: CC BY 4.0
+  project: dendrite-segmentation-ao2bh
+  url: https://universe.roboflow.com/raghads-workspace-5kpuc/dendrite-segmentation-ao2bh/dataset/2
+  version: 2
+  workspace: raghads-workspace-5kpuc
+test: test/images
+train: train/images
+val: val/images
