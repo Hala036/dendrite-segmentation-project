@@ -2,25 +2,22 @@
 
 Final project for Image Processing at Azrieli College of Engineering.
 
-This repository compares two ways of segmenting lithium dendrites from SEM images:
+This project compares two methods for segmenting lithium dendrites from SEM images:
 
-1. A classical computer vision pipeline based on preprocessing, thresholding, morphology, and skeletonization.
-2. A deep learning pipeline based on tiled YOLO instance segmentation.
+1. A classical computer vision pipeline
+2. A tiled YOLO segmentation pipeline
 
-The project scope is not just “make a mask”. It is to compare both approaches visually and quantitatively, inspect their failure cases, and produce clear artifacts for a report or short live demo.
+The goal is to compare both approaches visually and quantitatively and show their main strengths and weaknesses on the same dataset.
 
-## Project Scope
+## What This Repository Includes
 
-The repository covers:
+- preprocessing of grayscale SEM images
+- classical segmentation, mask cleanup, and skeletonization
+- YOLO dataset tiling, training, and tiled inference
+- metric-based comparison using IoU, Dice, Precision, and Recall
+- visual comparison artifacts and a short demo notebook
 
-- SEM image preprocessing for dendrite visibility improvement
-- Classical segmentation and postprocessing
-- Skeleton extraction for branch visualization
-- YOLO dataset preparation, training, and tiled inference
-- Quantitative comparison with IoU, Dice, Precision, and Recall
-- Visual comparison artifacts and a short demo notebook
-
-The repository does not try to be a production system. It is a project comparison setup for a small labeled dataset.
+This is a project repository, not a production package.
 
 ## Main Pipelines
 
@@ -90,18 +87,11 @@ dendrite-segmentation/
 
 ## Data Notes
 
-The labeled evaluation images are under `data/annotated/`.
+The labeled dataset used for comparison is under `data/annotated/`.
 
-Important detail:
-
-- The classical pipeline can optionally crop the image bottom to remove an SEM metadata bar.
-- For the current annotated evaluation dataset, extra cropping is disabled in the evaluation path so masks stay aligned with the labeled images.
-
-If you change dataset geometry, retrain or regenerate predictions before comparing metrics.
+If dataset geometry changes, both pipelines should be regenerated before comparing metrics again.
 
 ## Environment Setup
-
-Create a virtual environment and install the needed packages.
 
 ```bash
 python3 -m venv .venv
@@ -109,8 +99,6 @@ source .venv/bin/activate
 python3 -m pip install -U pip
 python3 -m pip install ultralytics opencv-python numpy matplotlib scikit-image scipy pyyaml nbformat
 ```
-
-If you already have a working `.venv`, use that instead.
 
 ## How To Run
 
@@ -120,11 +108,7 @@ If you already have a working `.venv`, use that instead.
 .venv/bin/python run_pipeline_b.py
 ```
 
-This generates:
-
-- original images for comparison
-- classical mask overlays
-- skeleton overlays
+This generates the classical masks, skeletons, and comparison visuals for the annotated test set.
 
 ### 2. Run the YOLO pipeline
 
@@ -144,9 +128,7 @@ This script:
 .venv/bin/python metrics.py
 ```
 
-This writes:
-
-- [metrics_results.csv](outputs/metrics_results.csv)
+This writes [metrics_results.csv](outputs/metrics_results.csv).
 
 ### 4. Create side-by-side comparison artifacts
 
@@ -154,14 +136,7 @@ This writes:
 .venv/bin/python comparison_results/artifacts.py
 ```
 
-This combines:
-
-- original image
-- classical mask
-- YOLO mask
-- skeleton
-
-into a single figure per test image.
+This combines the original image, classical mask, YOLO mask, and skeleton into one figure per test image.
 
 ## Demo Notebook
 
@@ -186,30 +161,27 @@ Before running it, set:
 
 in the first code cell.
 
-## Current Outputs
+## Published Outputs
 
-Main output folders:
+This public version keeps only selected final outputs:
 
-- `outputs/masks` for classical masks
-- `outputs/masks_tiled` for tiled YOLO masks
-- `outputs/skeletons` for classical skeletons
-- `outputs/visuals` for saved figures
-- `outputs/weights` for YOLO weights
+- `outputs/masks` for the final classical evaluation masks
+- `outputs/masks_tiled` for the final YOLO tiled evaluation masks
+- `outputs/skeletons` for the final classical skeletons
+- `outputs/metrics_results.csv` for the comparison table
+- `outputs/visuals/demo_comparison.png` for the demo figure
+- `outputs/weights/best.pt` for the trained YOLO weights
 
-Combined visual artifacts are written to:
+## Evaluation
 
-- `comparison_results/artifacts_combined`
-
-## Notes on Evaluation
-
-Metrics are computed against the annotated test set using:
+Metrics are computed on the annotated test set using:
 
 - IoU
 - Dice
 - Precision
 - Recall
 
-The project focuses on comparing behavior, not claiming that one model is universally best. The classical pipeline is easier to explain step by step, while the YOLO pipeline is usually stronger when segmentation quality is the main goal.
+The classical pipeline is easier to explain step by step, while the YOLO pipeline is usually stronger when raw segmentation quality is the main goal.
 
 ## Suggested Entry Points
 
